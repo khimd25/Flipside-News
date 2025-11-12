@@ -5,6 +5,71 @@ generator client {
   provider = "prisma-client-js"
 }
 
+model OnboardingBatch {
+  id          String              @id @default(cuid())
+  generatedAt DateTime            @default(now())
+  expiresAt   DateTime
+  articles    OnboardingArticle[]
+  assignments OnboardingAssignment[]
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+}
+
+model OnboardingArticle {
+  id         String            @id @default(cuid())
+  batchId    String
+  batch      OnboardingBatch   @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  articleId  String
+  article    Article           @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  title      String
+  description String?
+  url        String
+  sourceName String?
+  category   String?
+  urlToImage String?
+  publishedAt DateTime?
+  assignments OnboardingAssignment[]
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@unique([batchId, articleId])
+  @@index([url])
+}
+
+model OnboardingAssignment {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  batchId   String
+  batch     OnboardingBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  articleId String
+  article   OnboardingArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  status    OnboardingStatus  @default(PENDING)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@unique([userId, articleId])
+  @@index([userId, status])
+}
+
+enum OnboardingStatus {
+  PENDING
+  LIKED
+  DISLIKED
+}
+
+model UserInterest {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topic     String
+  score     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, topic])
+}
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -50,6 +115,11 @@ model User {
   ratings       UserRating[]
   categories    Category[]
   feedback      SentimentFeedback[]
+  onboardingCompleted Boolean       @default(false)
+  onboardingCompletedAt DateTime?
+  onboardingAssignments OnboardingAssignment[]
+  interests           UserInterest[]
+  interactions       UserArticleInteraction[] @relation("UserInteractions")
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -79,6 +149,7 @@ model Article {
   ratings     UserRating[]
   category    Category?     @relation(fields: [categoryId], references: [id])
   categoryId  String?
+  onboardingEntries OnboardingArticle[]
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 }
@@ -140,6 +211,21 @@ model UserPreference {
   showSentiment     Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+}
+
+model UserArticleInteraction {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation("UserInteractions", fields: [userId], references: [id], onDelete: Cascade)
+  articleUrl String
+  sourceName String?
+  category  String?
+  sentiment Float?
+  action    String   // 'read' or 'click'
+  createdAt DateTime @default(now())
+
+  @@unique([userId, articleUrl, action])
+  @@index([userId, createdAt])
 }
 
 // User sentiment feedback on an article (by URL)

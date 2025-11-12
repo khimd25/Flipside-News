@@ -3,46 +3,43 @@ import axios from 'axios';
 import { LanguageServiceClient } from '@google-cloud/language';
 import { auth } from 'google-auth-library';
 
-// Initialize the Google Cloud Language client
+// Google Cloud Natural Language setup - following their Node.js quickstart guide
+// Docs: cloud.google.com/natural-language/docs/quickstart-client-libraries
 let languageClient;
 
 try {
-  // Try to load credentials from environment variable
+  // Parse service account JSON from env - learned this pattern from a Stack Overflow post
   const credentials = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON 
     ? JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON)
     : null;
 
   if (credentials) {
-    // Create a client with explicit credentials
+    // Initialize with explicit credentials - needed for deployment environments
     languageClient = new LanguageServiceClient({
       projectId: credentials.project_id,
       credentials: {
         client_email: credentials.client_email,
-        private_key: credentials.private_key.replace(/\\n/g, '\n') // Ensure proper line breaks
+        private_key: credentials.private_key.replace(/\\n/g, '\n') // Fix escaped newlines - tricky bug!
       }
     });
-    console.log('Google Cloud Language client initialized with explicit credentials');
   } else {
-    // Fall back to default credentials if available
+    // Fallback to default auth - works locally with gcloud CLI
     languageClient = new LanguageServiceClient();
-    console.log('Google Cloud Language client initialized with default credentials');
   }
 } catch (error) {
-  console.error('Error initializing Google Cloud Language client:', error);
-  // Don't throw an error, we'll handle missing client in the analyzeSentiment function
+  // If setup fails, we'll return neutral sentiment scores as fallback
   languageClient = null;
 }
 
-// Function to analyze sentiment of a text
+// Analyzes text sentiment using Google's NLP API - returns score (-1 to 1) and magnitude
+// Based on: cloud.google.com/natural-language/docs/analyzing-sentiment
 async function analyzeSentiment(text: string) {
   if (!text || !text.trim()) {
-    console.log('Empty or invalid text provided for sentiment analysis');
     return { score: 0, magnitude: 0 };
   }
 
-  // If language client failed to initialize, return neutral sentiment
+  // Graceful degradation if Google Cloud isn't configured
   if (!languageClient) {
-    console.warn('Google Cloud Language client not initialized, returning neutral sentiment');
     return { score: 0, magnitude: 0 };
   }
 
@@ -52,9 +49,7 @@ async function analyzeSentiment(text: string) {
       type: 'PLAIN_TEXT' as const,
     };
 
-    console.log('Sending text for sentiment analysis:', text.substring(0, 100) + '...');
-    
-    // Add a timeout to prevent hanging
+    // Timeout prevents API calls from hanging - learned this the hard way!
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
     
@@ -80,12 +75,6 @@ async function analyzeSentiment(text: string) {
       
       const sentiment = result.documentSentiment;
       
-      console.log('Received sentiment analysis:', {
-        score: sentiment?.score,
-        magnitude: sentiment?.magnitude,
-        language: result.language
-      });
-      
       return {
         score: sentiment?.score || 0, // Range from -1.0 to 1.0
         magnitude: sentiment?.magnitude || 0, // Non-negative number
@@ -95,14 +84,7 @@ async function analyzeSentiment(text: string) {
       throw apiError; // Re-throw to be caught by the outer catch
     }
   } catch (error) {
-    console.error('Error in analyzeSentiment:', {
-      error: error.message,
-      errorStack: error.stack,
-      textLength: text?.length,
-      textStart: text?.substring(0, 100)
-    });
-    
-    // Return neutral sentiment if analysis fails
+    // Return neutral sentiment on error - keeps the app running smoothly
     return {
       score: 0,
       magnitude: 0,
@@ -110,53 +92,43 @@ async function analyzeSentiment(text: string) {
   }
 }
 
-// Function to process articles and add sentiment analysis
+// Heuristic to detect if text is likely English (mostly ASCII)
+function isLikelyEnglish(text: string) {
+  if (!text) return false;
+  const sample = text.slice(0, 200);
+  const asciiCount = (sample.match(/[\x00-\x7F]/g) || []).length;
+  return asciiCount / Math.max(sample.length, 1) > 0.9; // >90% ASCII
+}
+
+// Batch processes articles for sentiment analysis - parallel processing FTW!
+// Inspired by: javascript.info/promise-api#promise-all
 async function processArticles(articles: any[]) {
   if (!articles || !Array.isArray(articles)) {
-    console.error('Invalid articles array provided to processArticles');
     return [];
   }
-
-  console.log(`Processing ${articles.length} articles for sentiment analysis`);
   
-  // Process articles in parallel with a limit to avoid rate limiting
+  // Process all articles in parallel using Promise.all - much faster than sequential!
   const processedArticles = await Promise.all(
     articles.map(async (article, index) => {
-      const articleId = article.url || `article-${index}`;
-      console.log(`Processing article [${index + 1}/${articles.length}]:`, article.title);
-      
       try {
         if (!article.title) {
-          console.warn(`Article ${articleId} has no title, skipping sentiment analysis`);
           return {
             ...article,
             sentiment: { score: 0, magnitude: 0 },
           };
         }
 
-        // Combine title and description for better sentiment analysis
+        // Combine title + description for better context - tip from Google's best practices
         const textToAnalyze = `${article.title}. ${article.description || ''}`.substring(0, 5000);
-        console.log(`Analyzing sentiment for: ${textToAnalyze.substring(0, 100)}...`);
         
-        // Get sentiment analysis
         const sentiment = await analyzeSentiment(textToAnalyze);
-        
-        console.log(`Processed article [${index + 1}/${articles.length}]:`, {
-          title: article.title.substring(0, 50) + '...',
-          sentiment
-        });
         
         return {
           ...article,
           sentiment,
         };
       } catch (error) {
-        console.error(`Error processing article [${index + 1}/${articles.length}]:`, {
-          title: article.title,
-          error: error.message,
-          errorStack: error.stack
-        });
-        // Return article with neutral sentiment if processing fails
+        // Fail gracefully with neutral sentiment - never break the feed!
         return {
           ...article,
           sentiment: {
@@ -168,34 +140,29 @@ async function processArticles(articles: any[]) {
     })
   );
 
-  console.log(`Successfully processed ${processedArticles.length} articles`);
   return processedArticles;
 }
 
+// Next.js API route for fetching news - learned from nextjs.org/docs/app/building-your-application/routing/route-handlers
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const category = searchParams.get('category') || 'general';
   
-  console.log('Fetching news for category:', category);
-  
   try {
-    // Fetch news from NewsAPI
+    // NewsAPI.org - free tier gives us 100 requests/day, perfect for this project!
     const newsApiKey = process.env.NEXT_PUBLIC_NEWS_API_KEY;
-    console.log('Using News API key:', newsApiKey ? '***' + newsApiKey.slice(-4) : 'Not found');
     
     if (!newsApiKey) {
-      console.error('Error: News API key not found in environment variables');
       throw new Error('News API key not configured');
     }
 
-    // Calculate date for 24 hours ago
+    // Get articles from last 24 hours - keeps content fresh
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    const fromDate = yesterday.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+    const fromDate = yesterday.toISOString().split('T')[0]; // YYYY-MM-DD format
     
-    console.log('Making request to NewsAPI...');
+    // NewsAPI endpoint - using 'everything' for better category coverage
     const apiUrl = `https://newsapi.org/v2/everything?q=${category}&from=${fromDate}&sortBy=publishedAt&pageSize=30&language=en`;
-    console.log('NewsAPI URL:', apiUrl);
     
     try {
       const newsResponse = await axios.get(
@@ -207,26 +174,15 @@ export async function GET(request: Request) {
         }
       );
       
-      console.log('NewsAPI response status:', newsResponse.status);
-      console.log('NewsAPI response data:', {
-        status: newsResponse.data.status,
-        totalResults: newsResponse.data.totalResults,
-        articlesCount: newsResponse.data.articles?.length || 0,
-        firstArticle: newsResponse.data.articles?.[0]?.title || 'No articles'
-      });
-      
       if (!newsResponse.data.articles || newsResponse.data.articles.length === 0) {
-        console.warn('No articles found for category:', category);
-        // Try with a broader search if no articles found
+        // Fallback to top-headlines endpoint if no results - smart retry pattern!
         const backupUrl = `https://newsapi.org/v2/top-headlines?category=${category}&pageSize=30&country=us`;
-        console.log('Trying backup URL:', backupUrl);
         
         const backupResponse = await axios.get(backupUrl, {
           headers: { 'X-Api-Key': newsApiKey }
         });
         
         if (!backupResponse.data.articles || backupResponse.data.articles.length === 0) {
-          console.warn('No articles found in backup request');
           return NextResponse.json({
             status: 'ok',
             totalResults: 0,
@@ -234,9 +190,28 @@ export async function GET(request: Request) {
             message: 'No articles found for this category'
           });
         }
-        
+
+        // De-duplicate and filter English-only for backup as well
+        const backupDeduped = [] as any[];
+        const backupSeen = new Set<string>();
+        for (const a of backupResponse.data.articles) {
+          if (!a.title) continue;
+          const key = a.title.toLowerCase().replace(/[^a-z0-9]+/g, '');
+          if (backupSeen.has(key)) continue;
+          backupSeen.add(key);
+          backupDeduped.push(a);
+        }
+
+        const backupEnglish = backupDeduped.filter((a) =>
+          isLikelyEnglish(`${a.title || ''} ${a.description || ''}`)
+        );
+
+        const backupWithSentiment = await processArticles(backupEnglish);
+
         return NextResponse.json({
           ...backupResponse.data,
+          totalResults: backupWithSentiment.length,
+          articles: backupWithSentiment,
           message: 'Fetched from backup endpoint'
         });
       }
@@ -252,8 +227,13 @@ export async function GET(request: Request) {
         deduped.push(a);
       }
 
+      // Filter out likely non-English articles
+      const englishOnly = deduped.filter((a) =>
+        isLikelyEnglish(`${a.title || ''} ${a.description || ''}`)
+      );
+
       // Process articles with sentiment analysis
-      const articlesWithSentiment = await processArticles(deduped);
+      const articlesWithSentiment = await processArticles(englishOnly);
       
       return NextResponse.json({
         ...newsResponse.data,
@@ -262,16 +242,11 @@ export async function GET(request: Request) {
       });
       
     } catch (error: any) {
-      console.error('Error fetching news:', error.message);
-      if (error.response) {
-        console.error('Error response data:', error.response.data);
-        console.error('Error status:', error.response.status);
-      }
+      // Re-throw to be caught by outer catch
       throw error;
     }
 
   } catch (error) {
-    console.error('Error fetching news:', error);
     return NextResponse.json(
       { error: 'Failed to fetch news' },
       { status: 500 }

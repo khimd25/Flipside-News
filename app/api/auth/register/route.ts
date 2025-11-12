@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/prisma';
+import { assignOnboardingArticlesToUser } from '@/lib/onboarding';
+
 
 export async function POST(request: Request) {
   try {
@@ -40,6 +41,8 @@ export async function POST(request: Request) {
       }
     });
 
+    await assignOnboardingArticlesToUser(user.id);
+
     return NextResponse.json(
       { 
         user: {
@@ -59,3 +62,4 @@ export async function POST(request: Request) {
     );
   }
 }
+

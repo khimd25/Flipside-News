@@ -10,7 +10,12 @@
     "check-env": "node -e \"console.log('NEXT_PUBLIC_NEWS_API_KEY:', process.env.NEXT_PUBLIC_NEWS_API_KEY ? '***' + process.env.NEXT_PUBLIC_NEWS_API_KEY.slice(-4) : 'Not found')\"",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "cron:onboarding": "tsx scripts/onboarding-cron.ts",
+    "cron:onboarding:once": "tsx scripts/onboarding-cron.ts --once",
+    "cron:onboarding:now": "tsx scripts/onboarding-cron.ts --now",
+    "postbuild": "prisma generate && prisma migrate deploy"
+  
   },
   "dependencies": {
     "@auth/pg-adapter": "^1.11.1",
@@ -18,21 +23,26 @@
     "@google-cloud/language": "^6.5.0",
     "@headlessui/react": "^2.1.0",
     "@heroicons/react": "^2.1.1",
+    "@mozilla/readability": "^0.6.0",
     "@prisma/client": "^5.0.0",
     "@radix-ui/react-dialog": "^1.0.5",
     "@radix-ui/react-dropdown-menu": "^2.0.6",
     "@radix-ui/react-slot": "^1.0.2",
     "@radix-ui/react-tabs": "^1.0.4",
     "@tanstack/react-query": "^5.17.19",
-    "axios": "^1.6.2",
+    "@types/jsdom": "^27.0.0",
+    "axios": "^1.13.2",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
     "date-fns": "^3.3.1",
+    "dotenv": "^16.4.5",
+    "jsdom": "^27.1.0",
     "lucide-react": "^0.294.0",
     "next": "^16.0.1",
     "next-auth": "^4.24.13",
     "next-themes": "^0.2.1",
+    "node-cron": "^3.0.3",
     "pg": "^8.16.3",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -52,6 +62,7 @@
     "postcss": "^8.4.31",
     "prisma": "^5.0.0",
     "tailwindcss": "^3.3.5",
+    "tsx": "^4.7.0",
     "typescript": "^5.3.2"
   }
 }

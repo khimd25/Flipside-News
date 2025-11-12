@@ -1,14 +1,11 @@
 import type { NextAuthOptions } from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
 import CredentialsProvider from 'next-auth/providers/credentials';
-import { PrismaAdapter } from '@auth/prisma-adapter';
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/prisma';
 
 export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(prisma),
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
@@ -47,20 +44,33 @@ export const authOptions: NextAuthOptions = {
           email: user.email || undefined,
           name: user.name || undefined,
           image: user.image || undefined,
+          onboardingCompleted: user.onboardingCompleted
         } as any;
       }
     }),
   ],
   callbacks: {
     async session({ session, token }) {
-      if (token && session.user) {
-        (session.user as any).id = token.sub!;
+      if (token && session?.user) {
+        session.user.id = token.sub!;
+        session.user.onboardingCompleted = token.onboardingCompleted as boolean;
       }
       return session;
     },
     async jwt({ token, user }) {
       if (user) {
         token.sub = (user as any).id;
+        token.onboardingCompleted = (user as any).onboardingCompleted || false;
+      } else if (token.sub) {
+        // Fetch user data from DB on subsequent requests
+        const dbUser = await prisma.user.findUnique({
+          where: { id: token.sub },
+          select: { onboardingCompleted: true }
+        });
+        
+        if (dbUser) {
+          token.onboardingCompleted = dbUser.onboardingCompleted;
+        }
       }
       return token;
     },

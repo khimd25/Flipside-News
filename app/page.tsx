@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Button } from '@/components/ui/button';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from 'app/components/ui/button';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from 'app/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from 'app/components/ui/tabs';
 import { useSession, signIn } from 'next-auth/react';
 
 type Article = {
@@ -33,37 +33,40 @@ export default function Home() {
   const [articles, setArticles] = useState<Article[]>([]);
   const [feedbackMap, setFeedbackMap] = useState<Record<string, FeedbackSentiment>>({});
   const [savedArticleIds, setSavedArticleIds] = useState<Set<string>>(new Set());
+  const [selectedArticle, setSelectedArticle] = useState<any>(null);
+  const [isReading, setIsReading] = useState(false);
+  const [articleContent, setArticleContent] = useState<string>('');
+  const [readerFontScale, setReaderFontScale] = useState(1);
+  const fontSizeClass = readerFontScale <= 0 ? 'text-base' : readerFontScale === 1 ? 'text-lg' : 'text-xl';
 
   const categories = [
     'general', 'business', 'entertainment', 'health', 'science', 'sports', 'technology'
   ];
 
+  // Using TanStack Query for smart data fetching - learned from their docs at tanstack.com/query
+  // This handles caching, background refetching, and error states automatically - pretty sick!
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['news', selectedCategory],
     queryFn: async () => {
-      console.log('Fetching news for category:', selectedCategory);
       const res = await fetch(`/api/news?category=${selectedCategory}`);
       if (!res.ok) {
         const errorText = await res.text();
-        console.error('Failed to fetch news:', res.status, res.statusText, errorText);
         throw new Error(`Failed to fetch news: ${res.status} ${res.statusText}`);
       }
       const json = await res.json();
-      console.log('Received news data:', json);
       return json;
     },
   });
 
+  // Sync articles state when data changes - React pattern from beta.reactjs.org
   useEffect(() => {
     if (data?.articles) {
-      console.log('Updating articles with new data');
       setArticles(data.articles);
     }
   }, [data]);
 
-  // Force refetch when selectedCategory changes
+  // Force refetch when category changes - ensures fresh content per category
   useEffect(() => {
-    console.log('Selected category changed to:', selectedCategory);
     refetch();
   }, [selectedCategory, refetch]);
 
@@ -101,7 +104,7 @@ export default function Home() {
           }
         }
       } catch (e) {
-        console.warn('Failed to fetch user data', e);
+        // Silently fail for user data - non-critical feature
       }
     };
     
@@ -172,6 +175,49 @@ export default function Home() {
     return 'Showing Negative';
   };
 
+  const handleReadArticle = async (article: any) => {
+    setSelectedArticle(article);
+    setIsReading(true);
+    
+    // Track the read interaction if user is logged in
+    if (session?.user) {
+      fetch('/api/interactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          articleUrl: article.url,
+          sourceName: article.source?.name || article.sourceName,
+          category: selectedCategory,
+          sentiment: article.sentiment?.score,
+          action: 'read'
+        })
+      }).catch(() => {
+        // Analytics fail silently - don't interrupt the reading experience
+      });
+    }
+    
+    try {
+      const response = await fetch(`/api/extract-article?url=${encodeURIComponent(article.url)}`);
+      const data = await response.json();
+      if (data.success) {
+        // Successfully extracted article content
+        setArticleContent(data.content);
+      } else {
+        // Fallback message when extraction fails - user experience first!
+        setArticleContent('Sorry, we couldn’t load the article content. Please visit the original link.');
+      }
+    } catch (error) {
+      // Fallback message when extraction fails - user experience first!
+      setArticleContent("Sorry, we couldn't load the article content. Please visit the original link.");
+    }
+  };
+
+  const handleCloseReader = () => {
+    setIsReading(false);
+    setSelectedArticle(null);
+    setArticleContent('');
+  };
+
   if (error) {
     return (
       <div className="space-y-6">
@@ -192,8 +238,30 @@ export default function Home() {
     );
   }
 
+  const getGreeting = () => {
+    if (!session?.user) return null;
+    
+    const name = session.user.name || session.user.email?.split('@')[0] || 'News Explorer';
+    const greetings = [
+      `Welcome back, ${name}! Ready to flip the script on today’s headlines?`,
+      `Hey ${name}! Your personalized news feed is fresh and ready to flip.`,
+      `Good to see you, ${name}! Let’s see what stories are worth flipping through.`,
+      `${name}, your dashboard is live—time to flip perspectives on the latest buzz.`,
+      `Back for more, ${name}? Let’s flip some narratives and find the gems.`,
+    ];
+    
+    return greetings[Math.floor(Math.random() * greetings.length)];
+  };
+
   return (
     <div className="space-y-6">
+      {session?.user && (
+        <div className="text-center mb-4">
+          <p className="text-lg font-medium text-purple-600 dark:text-purple-400">
+            {getGreeting()}
+          </p>
+        </div>
+      )}
       <div className="flex flex-col items-center mb-8 space-y-4">
         <h2 className="text-2xl font-bold tracking-tight">Latest News</h2>
         <Button 
@@ -247,7 +315,7 @@ export default function Home() {
           ) : !articles || articles.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 space-y-4 text-center">
               <h3 className="text-xl font-semibold text-gray-700">No articles found</h3>
-              <p className="text-gray-500">We couldn't find any {selectedCategory} news at the moment.</p>
+              <p className="text-gray-500">We couldn’t find any {selectedCategory} news at the moment.</p>
               <p className="text-sm text-gray-400">Try selecting a different category or check back later.</p>
             </div>
           ) : displayedArticles.length === 0 ? (
@@ -368,7 +436,7 @@ export default function Home() {
                               }
                             }
                           } catch (error) {
-                            console.error('Error toggling save:', error);
+                            // Save/unsave errors fail gracefully
                           }
                         }}
                       >
@@ -384,6 +452,14 @@ export default function Home() {
                           Read More →
                         </a>
                       </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleReadArticle(article)}
+                        className="mt-2"
+                      >
+                        Read on Flipside
+                      </Button>
                     </div>
                   </CardFooter>
                 </Card>
@@ -392,6 +468,64 @@ export default function Home() {
           )}
         </TabsContent>
       </Tabs>
+      {isReading && selectedArticle && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl ring-1 ring-zinc-200 dark:ring-zinc-800 w-full max-w-3xl max-h-[85vh] overflow-hidden relative">
+            <div className="sticky top-0 z-10 flex items-center justify-between gap-3 px-5 py-4 border-b border-zinc-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 backdrop-blur">
+              <div className="min-w-0">
+                <h3 className="text-lg font-semibold truncate">{selectedArticle.title}</h3>
+                <p className="mt-0.5 text-xs text-zinc-500 truncate">
+                  {(() => {
+                    try {
+                      const u = new URL(selectedArticle.url);
+                      const host = u.hostname.replace(/^www\./, '');
+                      const date = selectedArticle.publishedAt ? new Date(selectedArticle.publishedAt).toLocaleDateString() : '';
+                      return `${host}${date ? ' • ' + date : ''}`;
+                    } catch { return ''; }
+                  })()}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => setReaderFontScale(Math.max(0, readerFontScale - 1))}
+                  className="px-2 py-1 text-sm rounded border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                  type="button"
+                >
+                  A-
+                </button>
+                <button
+                  onClick={() => setReaderFontScale(Math.min(2, readerFontScale + 1))}
+                  className="px-2 py-1 text-sm rounded border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                  type="button"
+                >
+                  A+
+                </button>
+                <a
+                  href={selectedArticle.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 text-sm rounded border border-indigo-500 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20"
+                >
+                  Open
+                </a>
+                <button
+                  onClick={handleCloseReader}
+                  className="p-2 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  aria-label="Close"
+                  type="button"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+              </div>
+            </div>
+            <div className="px-5 py-5 overflow-y-auto max-h-[calc(85vh-64px)]">
+              <div className={`text-zinc-800 dark:text-zinc-100 whitespace-pre-line leading-relaxed font-serif ${fontSizeClass}`}>
+                {articleContent}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

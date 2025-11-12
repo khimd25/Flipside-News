@@ -1,79 +1,65 @@
-'use client';
 
-import { useSession, signIn, signOut } from 'next-auth/react';
-import { useEffect, useState } from 'react';
+"use client";
+
+import { signIn, signOut, useSession } from "next-auth/react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useState } from "react";
+import { AnalyticsModal } from "./AnalyticsModal";
 
 export function Navbar() {
   const { data: session, status } = useSession();
+  const pathname = usePathname();
+  const [showAnalytics, setShowAnalytics] = useState(false);
 
-  const [hasAnimated, setHasAnimated] = useState(false);
-
-  useEffect(() => {
-    console.log('Navbar mounted, hasAnimated:', hasAnimated);
-    // Only animate on first load
-    if (!hasAnimated) {
-      console.log('Triggering flip animation');
-      setHasAnimated(true);
-      const timer = setTimeout(() => {
-        console.log('Animation should be complete now');
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [hasAnimated]);
+  // If we're on the onboarding page, don't show the navbar
+  if (pathname.startsWith("/onboarding")) {
+    return null;
+  }
 
   return (
-    <nav className="bg-white shadow-sm">
+    <>
+      <nav className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-700">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16">
-          <div className="flex">
-            <div className="flex-shrink-0 flex items-center">
-              <h1 className="text-xl font-bold text-indigo-600">
-                <span className={`inline-block ${hasAnimated ? 'animate-flip' : ''}`}>FLIP</span>
-                <span>SIDE</span>
-              </h1>
-            </div>
-            <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
-              <a href="/" className="border-indigo-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
-                Home
-              </a>
-              {session && (
-                <>
-                  <a href="/saved" className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
-                    Saved Articles
-                  </a>
-                  <a href="/categories" className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
-                    Categories
-                  </a>
-                </>
-              )}
-            </div>
+          <div className="flex items-center">
+            <Link href="/" className="text-xl font-semibold text-purple-600 dark:text-purple-400">
+              <span className="animate-flip">FLIP</span>side News
+            </Link>
           </div>
-          <div className="hidden sm:ml-6 sm:flex sm:items-center space-x-4">
-            {status === 'loading' ? (
-              <span className="text-gray-500">Loading...</span>
-            ) : session ? (
+
+          <div className="flex items-center space-x-4">
+            {status === "authenticated" ? (
               <>
-                <span className="text-sm text-gray-700">
-                  {session.user?.name || session.user?.email}
-                </span>
-                <button 
-                  onClick={() => signOut()}
-                  className="bg-gray-600 px-4 py-2 rounded-md text-sm font-medium text-white hover:bg-gray-700"
+                <button
+                  onClick={() => setShowAnalytics(true)}
+                  className="text-sm hover:text-blue-600 dark:hover:text-blue-400"
                 >
-                  Sign Out
+                  📊 My Stats
+                </button>
+                <Link href="/saved" className="text-sm hover:text-blue-600 dark:hover:text-blue-400">
+                  Saved Articles
+                </Link>
+                <button
+                  onClick={() => signOut()}
+                  className="text-sm hover:text-blue-600 dark:hover:text-blue-400"
+                >
+                  Sign out
                 </button>
               </>
             ) : (
-              <button 
+              <button
                 onClick={() => signIn()}
-                className="bg-indigo-600 px-4 py-2 rounded-md text-sm font-medium text-white hover:bg-indigo-700"
+                className="text-sm hover:text-blue-600 dark:hover:text-blue-400"
               >
-                Sign In
+                Create Your Dashboard
               </button>
             )}
           </div>
         </div>
       </div>
-    </nav>
+      </nav>
+      <AnalyticsModal isOpen={showAnalytics} onClose={() => setShowAnalytics(false)} />
+    </>
   );
 }
